@@ -1,0 +1,10 @@
+11:30:07 **** Incremental Build of configuration Debug for project Pratica0_SaveEnergy ****
+make -j12 all 
+arm-none-eabi-size   Pratica0_SaveEnergy.elf 
+   text	   data	    bss	    dec	    hex	filename
+    836	      8	   1568	   2412	    96c	Pratica0_SaveEnergy.elf
+Finished building: default.size.stdout
+ 
+
+11:30:07 Build Finished. 0 errors, 0 warnings. (took 206ms)
+

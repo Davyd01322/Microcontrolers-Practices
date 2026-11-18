@@ -1,0 +1,246 @@
+#include "stm32f1xx.h"
+#include <stdint.h>
+
+#define CPU_CLK 8000000
+#define BaudRate 115200
+#define MLX90614_ADDRESS 0x5A
+
+// estado do led
+enum led_state { on, off };
+
+enum led_state pb4 = off;
+
+// flag de controle para leitura do sensor e mostrar valores na tela
+enum main_state { i2c_process, uart_process, none };
+
+enum main_state process =
+    none; // ALTERADO: Começa parado (none) em vez de iniciar lendo direto
+
+// Inteiro para leitura da temperatura
+volatile uint8_t msb = 0;
+volatile uint8_t lsb = 0;
+volatile uint16_t temperature = 0;
+
+// variavel para máquina de estados
+enum i2c_state {
+  send_start,
+  wait_for_sb,
+  restart,
+  addr_sended,
+  dr_empty,
+  addr_resended,
+  read_lsb,
+  read_msb,
+  finished
+};
+
+enum i2c_state state;
+
+void i2c_interrupt_enable(int interrupt) { I2C1->CR2 |= (1 << interrupt); }
+
+void i2c_interrupt_disable(int interrupt) { I2C1->CR2 &= ~(1 << interrupt); }
+
+void send_i2c_request() {
+  state = send_start;
+  // Só faz uma coisa: Gerar a condição de start o resto é feito por interrupção
+  I2C1->CR1 |= (1 << 8);
+}
+
+void uart_send_raw_byte(uint8_t byte) {
+  // Espera o registrador de transmissão ficar vazio (TXE)
+  while (!(USART1->SR & (1 << 7)))
+    ;
+  USART1->DR = byte;
+}
+
+void uart_write_int(uint16_t v) {
+  // 0xAA é o nosso "cabeçalho" para o PC saber que começou o dado
+  uart_send_raw_byte(0xAA);
+
+  // Divide o número de 16 bits em duas metades de 8 bits
+  uart_send_raw_byte((uint8_t)(v >> 8));   // Byte mais significativo
+  uart_send_raw_byte((uint8_t)(v & 0xFF)); // Byte menos significativo
+
+  // 0x55 é o "rodapé" para avisar que terminou
+  uart_send_raw_byte(0x55);
+}
+
+// A função com strings do professor não é mais necessária, deixei em branco
+void uart_write(uint8_t *ch) {}
+
+void toggle_led(void) {
+  GPIOB->BSRR &= ~((1 << 4) | (1 << 20));
+
+  if (pb4 == off) {
+    GPIOB->BSRR |= (1 << 4);
+    pb4 = on;
+  } else {
+    GPIOB->BSRR |= (1 << 20);
+    pb4 = off;
+  }
+}
+
+int string_to_int(uint8_t *ch) {
+  int result = 0;
+  int local_index = 0;
+  int sign = 1;
+
+  if (ch[0] == '-') {
+    sign = -1;
+    local_index += 1;
+  }
+
+  while (ch[local_index] != '\n') {
+    if (((ch[local_index] - '0') >= 0) && ((ch[local_index] - '0') <= 9)) {
+      result *= 10;
+      result += ch[local_index] - '0';
+    } else {
+      return 0;
+    }
+    local_index += 1;
+  }
+
+  result *= sign;
+  return result;
+}
+
+void temperature_convert(void) {
+  // converter para kelvin
+  temperature /= 50;
+  // converter para celcius
+  temperature -= 273.15;
+}
+
+void I2C1_EV_IRQHandler(void) {
+  if ((I2C1->SR1 & (1 << 0)) && (state == send_start)) {
+    state = wait_for_sb;
+    I2C1->DR = (MLX90614_ADDRESS << 1) | 0;
+  } else if ((I2C1->SR1 & (1 << 1)) && (state == wait_for_sb)) {
+    volatile uint32_t temp;
+    state = addr_sended;
+    temp = I2C1->SR2;
+  } else if ((I2C1->SR1 & (1 << 7)) && (state == addr_sended)) {
+    state = dr_empty;
+    I2C1->DR = 0x07;
+  } else if (((I2C1->SR1 & ((1 << 7) | (1 << 2)))) == ((1 << 7) | (1 << 2)) &&
+             (state == dr_empty)) {
+    state = restart;
+    I2C1->CR1 |= (1 << 8);
+  } else if ((I2C1->SR1 & (1 << 0)) && (state == restart)) {
+    state = addr_resended;
+    I2C1->DR = (MLX90614_ADDRESS << 1) | 1;
+  } else if ((I2C1->SR1 & (1 << 1)) && (state == addr_resended)) {
+    volatile uint32_t temp;
+    state = read_lsb;
+    temp = I2C1->SR2;
+  } else if ((I2C1->SR1 & (1 << 6)) && (state == read_lsb)) {
+    lsb = I2C1->DR;
+    state = read_msb;
+  } else if ((I2C1->SR1 & (1 << 6)) && (state == read_msb)) {
+    msb = I2C1->DR;
+    temperature = (((uint16_t)msb << 8) | (uint16_t)lsb);
+    process = uart_process;
+    state = finished;
+
+    I2C1->CR1 &= ~(1 << 10);
+    I2C1->CR1 |= (1 << 9);
+  } else if ((I2C1->SR1 & (1 << 6)) && (state == finished)) {
+    toggle_led();
+    volatile uint8_t pec;
+    pec = I2C1->DR;
+    state = send_start;
+  }
+}
+
+// Rotina de interrupção do USART
+void USART1_IRQHandler(void) {
+  // Verifica se a interrupção foi causada por um dado recebido (RXNE - bit 5 do
+  // SR)
+  if (USART1->SR & (1 << 5)) {
+    uint8_t comando =
+        USART1->DR; // Lê o dado recebido (isso também limpa a flag RXNE)
+
+    // Se o PC enviar a letra 'L' ou 'l' (Ler), disparamos o processo do I2C
+    if (comando == 'L' || comando == 'l') {
+      // Só aceita o comando se o sistema estiver livre (none)
+      if (process == none) {
+        process = i2c_process; // Inicia a leitura do sensor!
+      }
+    }
+  }
+}
+
+int main(void) {
+  // Habilitar clocks
+  RCC->APB2ENR |= (1 << 3);  // GPIOB
+  RCC->APB2ENR |= (1 << 2);  // GPIOA
+  RCC->APB2ENR |= (1 << 14); // USART1
+  RCC->APB2ENR |= (1 << 0);  // AFIO
+  RCC->APB1ENR |= (1 << 21); // I2C1
+
+  /* Pino GPIO PB4 */
+  GPIOB->CRL &= 0xFFF0FFFF;
+  GPIOB->CRL |= 0x00020000;
+  GPIOB->BSRR |= (1 << 20);
+
+  /* Pinos do USART (Isso estava faltando no código do seu amigo!) */
+  // Configura o PA9 (TX da USART1) como Alternate Function Push-Pull
+  GPIOA->CRH &= 0xFFFFFF0F;
+  GPIOA->CRH |= 0x000000B0;
+
+  /* Configurar o USART */
+  USART1->CR1 |= (1 << 3); // TE (Transmitter enable)
+  USART1->CR1 |= (1 << 2); // RE (Receiver enable)
+
+  // NOVO: Habilitar a interrupção de recepção da UART (RXNEIE - bit 5 do CR1)
+  USART1->CR1 |= (1 << 5);
+
+  USART1->BRR = ((CPU_CLK + (BaudRate / 2U)) / BaudRate); // 115200 baud
+  USART1->CR1 |= (0 << 12);
+  USART1->CR1 |= (1 << 13); // Ligar USART
+
+  /* Configurar o Alternate Function */
+  AFIO->MAPR |= ((0 << 26) | (0 << 25) | (1 << 24));
+  AFIO->MAPR |= (1 << 1);
+
+  /* Configurando os pinos do i2c */
+  GPIOB->CRH &= 0xFFFFFF00;
+  GPIOB->CRH |= 0x000000FF;
+
+  // Reset I2C
+  I2C1->CR1 |= (1 << 15);
+  I2C1->CR1 &= ~(1 << 15);
+
+  I2C1->CR2 = 0x8;
+  I2C1->CCR = 80;
+  I2C1->TRISE = 9;
+
+  I2C1->CR1 |= (1 << 10);
+
+  i2c_interrupt_enable(10);
+  i2c_interrupt_enable(9);
+
+  I2C1->CR1 |= (1 << 0);
+
+  NVIC_EnableIRQ(USART1_IRQn);
+  NVIC_EnableIRQ(I2C1_EV_IRQn);
+
+  while (1) {
+    if (process == uart_process) {
+      temperature_convert(); // Transforma o dado bruto do I2C em Celsius
+      uart_write_int(
+          temperature); // Envia o Celsius em dado bruto (sem strings)
+      toggle_led();
+
+      // O delay (for) foi REMOVIDO pois agora o sistema espera o seu comando!
+
+      process = none; // ALTERADO: Volta a dormir (none) esperando você enviar
+                      // outro 'L'
+    } else if (process == i2c_process) {
+      send_i2c_request();
+      process = none; // Aguarda a interrupção do I2C fazer o trabalho
+    } else if (process == none) {
+      // Não faz nada, só espera as interrupções
+    }
+  }
+}

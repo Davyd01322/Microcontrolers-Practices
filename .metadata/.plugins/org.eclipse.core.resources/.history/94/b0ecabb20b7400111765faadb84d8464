@@ -1,0 +1,11 @@
+#include "stm32f1xx.h"
+int main(void){
+	RCC->APB2ENR |= (1 << 3); //Enable GPIOC Clock
+	GPIOB->CRL &= 0xFF0FFFFF; //Set C13 as Output
+	GPIOB->CRL |= 0x00200000;
+	while(1){
+		//Blink LED in Blue-Pill C13 pin
+		GPIOB->ODR &=~0x00002000;
+		for(int i=0;i<100000;i++);/*Delay*/
+	}
+}

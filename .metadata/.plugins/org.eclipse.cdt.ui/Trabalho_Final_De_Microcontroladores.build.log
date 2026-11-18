@@ -1,0 +1,10 @@
+22:55:15 **** Build of configuration Debug for project Trabalho_Final_De_Microcontroladores ****
+make -j12 all 
+arm-none-eabi-size   Trabalho_Final_De_Microcontroladores.elf 
+   text	   data	    bss	    dec	    hex	filename
+   2956	     12	   1572	   4540	   11bc	Trabalho_Final_De_Microcontroladores.elf
+Finished building: default.size.stdout
+ 
+
+22:55:16 Build Finished. 0 errors, 0 warnings. (took 853ms)
+

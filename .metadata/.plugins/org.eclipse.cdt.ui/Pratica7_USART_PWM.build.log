@@ -1,0 +1,10 @@
+11:00:17 **** Incremental Build of configuration Debug for project Pratica7_USART_PWM ****
+make -j12 all 
+arm-none-eabi-size   Pratica7_USART_PWM.elf 
+   text	   data	    bss	    dec	    hex	filename
+   2172	    208	   1584	   3964	    f7c	Pratica7_USART_PWM.elf
+Finished building: default.size.stdout
+ 
+
+11:00:17 Build Finished. 0 errors, 0 warnings. (took 199ms)
+

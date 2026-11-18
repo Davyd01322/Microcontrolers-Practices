@@ -1,0 +1,6 @@
+C:/Users/Davep/Microcontroladores/Pratica7_USART_PWM/F1_Header/Include/core_cm3.h:1511:22:__NVIC_EnableIRQ	16	static
+../Src/main.c:51:6:uart_read	4	static
+../Src/main.c:73:6:uart_write	16	static
+../Src/main.c:104:5:string_to_int	32	static
+../Src/main.c:133:6:USART1_IRQHandler	8	static
+../Src/main.c:176:5:main	48	static

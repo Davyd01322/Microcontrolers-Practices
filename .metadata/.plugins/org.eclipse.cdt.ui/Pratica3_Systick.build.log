@@ -1,0 +1,10 @@
+21:32:53 **** Build of configuration Debug for project Pratica3_Systick ****
+make -j12 all 
+arm-none-eabi-size   Pratica3_Systick.elf 
+   text	   data	    bss	    dec	    hex	filename
+   5108	     20	   1572	   6700	   1a2c	Pratica3_Systick.elf
+Finished building: default.size.stdout
+ 
+
+21:32:53 Build Finished. 0 errors, 0 warnings. (took 315ms)
+

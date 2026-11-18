@@ -1,0 +1,10 @@
+21:32:53 **** Incremental Build of configuration Debug for project Pratica4_Timer ****
+make -j12 all 
+arm-none-eabi-size   Pratica4_Timer.elf 
+   text	   data	    bss	    dec	    hex	filename
+    884	      8	   1568	   2460	    99c	Pratica4_Timer.elf
+Finished building: default.size.stdout
+ 
+
+21:32:53 Build Finished. 0 errors, 0 warnings. (took 209ms)
+

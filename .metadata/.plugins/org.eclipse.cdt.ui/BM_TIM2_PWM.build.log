@@ -1,0 +1,22 @@
+21:32:46 **** Build of configuration Debug for project BM_TIM2_PWM ****
+make -j12 all 
+arm-none-eabi-gcc "../Src/main.c" -mcpu=cortex-m3 -std=gnu11 -g3 -DDEBUG -DSTM32 -DSTM32F1 -DSTM32F103C8Tx -DSTM32F103xB=STM32F103xB -c -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/Inc" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Include" -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Src/main.d" -MT"Src/main.o" --specs=nano.specs -mfloat-abi=soft -mthumb -o "Src/main.o"
+arm-none-eabi-gcc "../Src/syscalls.c" -mcpu=cortex-m3 -std=gnu11 -g3 -DDEBUG -DSTM32 -DSTM32F1 -DSTM32F103C8Tx -DSTM32F103xB=STM32F103xB -c -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/Inc" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Include" -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Src/syscalls.d" -MT"Src/syscalls.o" --specs=nano.specs -mfloat-abi=soft -mthumb -o "Src/syscalls.o"
+arm-none-eabi-gcc "../Src/sysmem.c" -mcpu=cortex-m3 -std=gnu11 -g3 -DDEBUG -DSTM32 -DSTM32F1 -DSTM32F103C8Tx -DSTM32F103xB=STM32F103xB -c -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/Inc" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include" -I"C:/Users/Davep/Microcontroladores(Práticas)/BM_TIM2_PWM/F1_Header/Include" -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Src/sysmem.d" -MT"Src/sysmem.o" --specs=nano.specs -mfloat-abi=soft -mthumb -o "Src/sysmem.o"
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/Inc: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/Inc: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/Inc: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Device/ST/STM32F1xx/Include: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Include: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Include: Invalid argument
+cc1.exe: error: C:/Users/Davep/Microcontroladores(Pr??ticas)/BM_TIM2_PWM/F1_Header/Include: Invalid argument
+make: *** [Src/subdir.mk:25: Src/main.o] Error 1
+make: *** Waiting for unfinished jobs....
+make: *** [Src/subdir.mk:25: Src/syscalls.o] Error 1
+make: *** [Src/subdir.mk:25: Src/sysmem.o] Error 1
+"make -j12 all" terminated with exit code 2. Build might be incomplete.
+
+21:32:47 Build Failed. 4 errors, 0 warnings. (took 517ms)
+

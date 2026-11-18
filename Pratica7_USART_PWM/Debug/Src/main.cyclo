@@ -1,0 +1,6 @@
+core_cm3.h:1511:22:__NVIC_EnableIRQ	2
+main.c:51:6:uart_read	2
+main.c:73:6:uart_write	3
+main.c:104:5:string_to_int	5
+main.c:133:6:USART1_IRQHandler	5
+main.c:176:5:main	14

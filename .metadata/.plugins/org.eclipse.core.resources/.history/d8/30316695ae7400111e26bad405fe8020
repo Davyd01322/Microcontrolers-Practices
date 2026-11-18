@@ -1,0 +1,565 @@
+#include <stdint.h>
+#include "stm32f1xx.h"
+
+#define CPU_CLK 			8000000
+#define BaudRate 			115200
+#define MLX90614_ADDRESS	0x5A
+
+// estado do led
+enum led_state{
+	on,
+	off
+};
+
+enum led_state pb4 = off;
+
+// Buffer Circular para recepção de dados
+uint8_t buffer[5]; // 5 Bytes
+int index = 0;
+
+// flag de controle para leitura do sensor e mostrar valores na tela
+enum main_state{
+	i2c_process,
+	uart_process,
+	none
+};
+
+enum main_state process = i2c_process;
+
+// Ponteiro para o envio dos caracteres
+uint8_t *ptr;
+
+// Inteiro para leitura da temperatura
+volatile uint8_t msb = 0;
+volatile uint8_t lsb = 0;
+volatile uint16_t temperature = 0;
+
+// variavel para máquina de estados
+enum i2c_state {
+	send_start,
+	wait_for_sb,
+	restart,
+	addr_sended,
+	dr_empty,
+	addr_resended,
+	read_lsb,
+	read_msb,
+	finished
+};
+
+enum i2c_state state;
+
+void i2c_interrupt_enable(int interrupt){
+	I2C1->CR2 |= (1 << interrupt);
+}
+
+void i2c_interrupt_disable(int interrupt){
+	I2C1->CR2 &= ~(1 << interrupt);
+}
+
+void send_i2c_request(){
+	state = send_start;
+	// Só faz uma coisa: Gerar a condição de start o resto é feito por interrupção
+
+	// 26.6.1 I2C Control register 1 (I2C_CR1)
+	// gerar a condição de start
+	// Bit 8 START: Start generation
+	// In Master Mode:
+	// 1: Repeated start generation
+	// In Slave mode:
+	// 1: Start generation when the bus is free
+	I2C1->CR1 |= (1 << 8);
+}
+
+void uart_read(void){
+	buffer[index] = USART1->DR;
+	index += 1;
+
+	if(index == 3){
+		buffer[3] = '\n';
+		buffer[4] = '\r';
+
+		index = 0;
+
+		// Buffer cheio vamos encerrar o recebimento de requições
+		process = none;
+
+		// Habilitar a interrupção de recepção de dados
+		// Bit 5 RXNEIE: RXNE interrupt enable
+		// 0: Interrupt is inhibited
+		// 1: A USART interrupt is generated whenever ORE=1 or RXNE=1
+		// in the USART_SR register
+		USART1->CR1 &= ~(1 << 5);
+	}
+}
+
+void uart_write(uint8_t *ch){
+	// 27.6.1 Status register (USART_SR)
+	// vamos verificar se o conteúdo anterior em DR já foi enviado para
+	// não perdermos caracteres no processo.
+	// Para fazermos isso vamos ler o bit 7 Transmit data register empty
+	// para sabermos se o registrador TDR (do qual não temos acesso)
+	// enviou seu conteúdo
+	// 0: Data is not transferred to the shift register
+	// 1: Data is transferred to the shift register
+	while(!(USART1->SR & (1 << 7))){} // Bit 7 TXE: Transmit data register empty
+
+	// Enviar o primeiro caractere
+	USART1->DR = (*ch & 0xFF);
+
+	// Verificar se o byte foi enviado
+	// 27.6.1 Status register (USART_SR)
+	// Bit 6 TC: Transmission complete
+	// 0: Transmission is not complete
+	// 1: Transmission is complete
+	while(!(USART1->SR & (1 << 6))){}
+
+	ptr = ch + 1;
+
+	// Vamos habilitar temporariamente a interrupção para
+	// "automatizar" a transmissão
+	// Bit 7 TXEIE: TXE interrupt enable
+	// 1: A USART interrupt is generated whenever TXE=1 in the
+	// USART_SR register
+	USART1->CR1 |= (1 << 7);
+}
+
+void uart_write_int(uint16_t v){
+	uint8_t buf[6];
+	uint8_t lncrf[] = "Zero\n\r";
+	int i = 5;
+
+	buf[i] = '\0';
+	i -= 1;
+
+	if(v == 0){
+		uart_write(lncrf);
+		return;
+	}
+
+	while(v > 0){
+		buf[--i] = (v % 10) + '\0';
+		v /= 10;
+	}
+
+	uart_write(&buf[i]);
+	uart_write(&lncrf[0]);
+}
+
+void toggle_led(void){
+	for(int i = 0; i < 1000; i++);
+	GPIOB->BSRR &= ~((1 << 4) | (1 << 20));
+
+	if(pb4 == off){
+		GPIOB->BSRR |= (1 << 4);
+		pb4 = on;
+	}
+	else{
+		GPIOB->BSRR |= (1 << 20);
+		pb4 = off;
+	}
+}
+
+
+int string_to_int(uint8_t *ch){
+	int result = 0;
+	int local_index = 0;
+	int sign = 1;
+
+	// verificar se é um número negativo ou não
+	if(ch[0] == '-'){
+		sign = -1;
+		local_index += 1;
+	}
+
+	while(ch[local_index] != '\n'){
+		// checar se o caractere é número
+		if(((ch[local_index] - '0') >= 0) && ((ch[local_index] - '0') <= 9)){
+			result *= 10;
+			result += ch[local_index] - '0';
+		}
+		else{
+			return 0;
+		}
+		local_index += 1;
+	}
+
+	result *= sign;
+
+	return result;
+}
+
+void temperature_convert(void){
+	// converter para kelvin
+	temperature = temperature / 50;
+	// converter para celcius
+	temperature -= 273.15;
+}
+
+void I2C1_EV_IRQHandler(void){
+	int flag = I2C1->SR1;
+
+	// verificar se SB foi disparada
+	// Bit 0 SB: Start bit (Master mode)
+	// 1: Start condition generated.
+	// – Set when a Start condition generated.
+	// – Cleared by software by reading the SR1 register followed by writing
+	// the DR register, or by hardware when PE=0
+	if((flag & (1 << 0)) && (state == send_start)){
+		state = wait_for_sb;
+
+		// Escrever o slave address no data register junto com o comando de escrita (0)
+		I2C1->DR = (MLX90614_ADDRESS << 1) | 0;
+	}
+
+	// verificar se ADDR foi disparada
+	// Bit 1 ADDR: Address sent (master mode)/matched (slave mode)
+	// 1: End of address transmission
+	// – For 10-bit addressing, the bit is set after the ACK of the 2nd byte.
+	// – For 7-bit addressing, the bit is set after the ACK of the byte.
+	else if((flag & (1 << 1)) && (state == wait_for_sb)){
+		volatile uint32_t temp;
+		state = addr_sended;
+
+		// Procedimento para zerar a flag ADDR
+		temp = I2C1->SR2;
+	}
+
+	// verificar se TxE foi disparada
+	// Bit 7 TxE: Data register empty (transmitters)
+	// 1: Data register empty
+	// – Set when DR is empty in transmission. TxE is not set during address phase.
+	// – Cleared by software writing to the DR register or by hardware after a
+	// start or a stop condition or when PE=0.
+	else if((flag & (1 << 7)) && (state == addr_sended)){
+		state = dr_empty;
+
+		// Escrever o endereço do registrador que queremos ler
+		I2C1->DR = 0x07;
+	}
+
+	// Verificar se TxE e BTF foram disparadas
+	// Bit 2 BTF: Byte transfer finished
+	// 1: Data byte transfer succeeded
+	// – Set by hardware when NOSTRETCH=0 and:
+	// – – In transmission when a new byte should be sent and DR has not been
+	// written yet (TxE=1).
+	else if(((flag & ((1 << 7) | (1 << 2)))) == ((1 << 7) | (1 << 2)) && (state == dr_empty)){
+		state = restart;
+
+		// gerar um repeated start
+		I2C1->CR1 |= (1 << 8);
+	}
+
+	// verificar se SB foi disparada
+	// Bit 0 SB: Start bit (Master mode)
+	// 1: Start condition generated.
+	// – Set when a Start condition generated.
+	// – Cleared by software by reading the SR1 register followed by writing
+	// the DR register, or by hardware when PE=0
+	else if((flag & (1 << 0)) && (state == restart)){
+		state = addr_resended;
+
+		// Escrever o slave address no data register junto com o comando de leitura (1)
+		I2C1->DR = (MLX90614_ADDRESS << 1) | 1;
+	}
+
+	// verificar se ADDR foi disparada
+	// Bit 1 ADDR: Address sent (master mode)/matched (slave mode)
+	// 1: End of address transmission
+	// – For 10-bit addressing, the bit is set after the ACK of the 2nd byte.
+	// – For 7-bit addressing, the bit is set after the ACK of the byte.
+	else if((flag & (1 << 1)) && (state == addr_resended)){
+		volatile uint32_t temp;
+		state = read_lsb;
+
+		// Procedimento para zerar a flag ADDR
+		temp = I2C1->SR1;
+		temp = I2C1->SR2;
+	}
+
+	// Bit 6 RxNE: Data register not empty (receivers)
+	// 1: Data register not empty– Set when data register is not empty in receiver mode.
+	// RxNE is not set during address phase.– Cleared by software reading or writing
+	// the DR register or by hardware when PE=0.
+	else if((flag & (1 << 6)) && (state == read_lsb)){
+		lsb = I2C1->DR;
+		state = read_msb;
+
+		// Vamos habilitar o ack (indicando que queremos receber mais um byte)
+		// Bit 10 ACK: Acknowledge enable
+		// 1: Acknowledge returned after a byte is received (matched address or data)
+		I2C1->CR1 |= (1 << 10);
+	}
+
+	// Bit 6 RxNE: Data register not empty (receivers)
+	// 1: Data register not empty– Set when data register is not empty in receiver mode.
+	// RxNE is not set during address phase.– Cleared by software reading or writing
+	// the DR register or by hardware when PE=0.
+	else if((flag & (1 << 6)) && (state == read_msb)){
+		msb = I2C1->DR;
+		temperature = ((uint16_t)(msb << 8) | (uint16_t)lsb);
+		process = uart_process;
+		state = finished;
+
+		// Vamos habilitar o ack (indicando que não queremos receber mais nada)
+		// Bit 10 ACK: Acknowledge enable
+		// 1: Acknowledge returned after a byte is received (matched address or data)
+		I2C1->CR1 &= ~(1 << 10);
+	}
+
+	// Bit 6 RxNE: Data register not empty (receivers)
+	// 1: Data register not empty– Set when data register is not empty in receiver mode.
+	// RxNE is not set during address phase.– Cleared by software reading or writing
+	// the DR register or by hardware when PE=0.
+	else if((flag & (1 << 6)) && (state == finished)){
+		toggle_led();
+		volatile uint8_t pec;
+		pec = I2C1->DR;
+		state = send_start;
+
+		// Por fim gerar a condição de STOP
+		// Bit 9 STOP: Stop generation
+		// 1: Stop generation after the current byte transfer
+		// or after the current Start condition is sent.
+		I2C1->CR1 |= (1 << 9);
+	}
+}
+
+// Rotina de interrupção do USART
+void USART1_IRQHandler(void){
+	// 27.4 USART interrupts
+
+	// Table 196. USART interrupt requests
+	// 27.6. 1 Status register (USART_SR)
+	// Bit 5 RXNE: Read data register not empty
+	// 0: Data is not received
+	// 1: Received data is ready to be read.
+	if((USART1->SR & (1 << 5))){
+		uart_read();
+	}
+	else{
+		// Table 196. USART interrupt requests
+		// Transmit data register empty(TXE): Enable Control Bit => TXEIE
+		// 27.6.1 Status register (USART_SR)
+		// Essa flag indica que o registrador Data Register está vazio
+		// e aceita a escrita de novo byte
+		if((USART1->SR & (1 << 7))){
+			if(*ptr){
+				// Estamos colocando o caractere dentro de DR e a USART
+				// já inicia automaticamente a transmissão
+				USART1->DR = (*ptr & 0xFF);
+
+				// Verificar se o byte foi enviado
+				// 27.6.1 Status register (USART_SR)
+				// Bit 6 TC: Transmission complete
+				// 0: Transmission is not complete
+				// 1: Transmission is complete
+				while(!(USART1->SR & (1 << 6))){}
+
+				// próximo byte a ser enviado
+				ptr++;
+			}
+			else{
+				// 27.6.4 Control register 1 (USART_CR1)
+				// Aqui vamos inibir a interrupção TXE limpando o bit 7
+				// (Bit 7 TXEIE: TXE interrupt enable)
+				USART1->CR1 &= ~(1 << 7);
+			}
+		}
+	}
+}
+
+
+int main(void){
+	// Primeiro vamos habilitar o clock do GPIOA e do GPIOB
+	// 8.3 RCC Registers
+	// 8.3.7 APB2 peripheral clock enable register (RCC_APB2ENR)
+	// Bit 3 IOPBEN: I/O port B clock enable
+	// 1:I/O port B clock enabled
+	// Bit 2 IOPAEN: I/O port A clock enable
+	// 1:I/O port A clock enabled
+	RCC->APB2ENR |= (1 << 3); // GPIOB
+	RCC->APB2ENR |= (1 << 2); // GPIOA
+
+	// Habilitar o clock da USART
+	// 8.3.7 APB2 peripheral clock enable register (RCC_APB2ENR)
+	// Bit 14USART1EN: USART1 clock enable
+	// 1: USART1 clock enabled
+	RCC->APB2ENR |= (1 << 14);
+
+	// Habilitar o clock do alternate function
+	// 8.3.7 APB2 peripheral clock enable register (RCC_APB2ENR)
+	// Bit 0 AFIOEN: Alternate function I/O clock enable
+	// 1: Alternate Function I/O clock enabled
+	RCC->APB2ENR |= (1 << 0);
+
+	// Ativando o clock da interface i2c1
+	// 8.3.8 APB1 peripheral clock enable register (RCC_APB1ENR)
+	// Bit 21 I2C1EN: I2C 1 clock enable
+	// 0: I2C 1 clock disabled
+	// 1: I2C 1 clock enabled
+	RCC->APB1ENR |= (1 << 21);
+
+	/* Pino GPIO PB4 */
+	// 9.2 GPIO Registers
+	// 9.2.1 Port configuration register low (GPIOx_CRL) (x=A..G)
+	GPIOB->CRL &= 0xFFF0FFFF;
+	GPIOB->CRL |= 0x00020000; // CFN[1:0] = 00 e MODE[1:0]=10
+
+	// Desligar o led
+	GPIOB->BSRR |= (1 << 20);
+
+	/* Pinos do USART */
+	// Agora vamos configurar os pinos PA10 como entrada (RX1)
+	// No caso uma entrada com pull-up/pull-down
+	// 9.2 GPIO Registers
+	// 9.2.2 Port configuration register low (GPIOx_CRH) (x=A..G)
+	GPIOA->CRH &= 0xFFFFF0FF;
+	GPIOA->CRH |= 0x00000400; // CFN[1:0] = 01 e MODE[1:0]=00
+
+	// Agora vamos configurar os pinos PA9 como saida (TX1)
+	// No caso uma saida alternate function push-pull com max speed 50MHz
+	// 9.2 GPIO Registers
+	// 9.2.2 Port configuration register low (GPIOx_CRH) (x=A..G)
+	GPIOA->CRH &= 0xFFFFFF0F;
+	GPIOA->CRH |= 0x000000B0; // CFN[1:0] = 10 e MODE[1:0]=11
+
+	/* Configurar o USART */
+	// 27.6.4 Control register 1 (USART_CR1)
+	// Bit 3 TE: Transmitter enable
+	// 1: Transmitter is enabled
+	USART1->CR1 |= (1 << 3);
+
+	// Bit 2 RE: Receiver enable
+	// 1: Receiver is enabled and begins searching for a start bit
+	USART1->CR1 |= (1 << 2);
+
+	// Definir o baud rate
+	// 27.6.3 Baud rate register (USART_BRR)
+	USART1->BRR = ((CPU_CLK + (BaudRate/2U))/BaudRate);
+
+	// Configurar o tamanho da palavra que será transmitida
+	// 27.6.4 Control register 1 (USART_CR1)
+	// 0: 1 Start bit, 8 Data bits, n Stop bit
+	USART1->CR1 |= (0 << 12); // Bit 12 M: Word length
+
+	// Ligar a USART
+	// 27.6.4 Control register 1 (USART_CR1)
+	USART1->CR1 |= (1 << 13); // Bit 13 UE: USART enable
+
+	/* Configurar o Alternate Function */
+
+	/* Desabilitar parcialmente o JTAG */
+	// Precisamos fazer isso para liberar o pino pb4 para podermos usar nossa função
+	// toggle
+	AFIO->MAPR |= ((0 << 26) | (0 << 25) | (1 << 24));
+
+	// Seguindo o datasheet
+	// 9.3.9 I2C1 alternate function remapping
+	// Table 55. I2C1 remapping
+	// PB9 = I2C1_SDA, se I2C1_REMAP = 1
+	// PB8 = I2C1_SCL, se I2C1_REMAP = 1
+	// 9.4.2 AF remap and debug I/O configuration register (AFIO_MAPR)
+	// Bit 1 I2C1_REMAP: I2C1 remapping
+	// 1: Remap (SCL/PB8, SDA/PB9)
+	AFIO->MAPR |= (1 << 1);
+
+	/* Configurando os pinos do i2c */
+
+	// 9.2.2 Port configuration register high (GPIOx_CRH) (x=A..G)
+	// Configurar a função dos pinos de GPIOB (para o i2c)
+	GPIOB->CRH &= 0xFFFFFF00; 	// Máscara
+	// Setando os bits MODE e CFN
+	// MODE = 11: Output mode, max speed 50 MHz
+	// CFN = 11: Alternate function output Open-drain
+	GPIOB->CRH |= 0x000000FF;
+	//GPIOB->CRH |= 0x000000EE;
+
+	// Agora vamos resetar o periférico do i2c
+	// 26.6.1 I2C Control register 1 (I2C_CR1)
+	// Bit 15 SWRST: Software reset
+	// 0: I2C Peripheral not under reset
+	// 1: I2C Peripheral under reset state
+	I2C1->CR1 |= (1 << 15);
+	I2C1->CR1 &= ~(1 << 15);
+
+	// Vamos configurar a frequência no pino PB
+	// 26.6.2 I2C Control register 2 (I2C_CR2)
+	// Bits 5:0 FREQ[5:0]: Peripheral clock frequency
+	// The FREQ bits must be configured with the APB clock frequency
+	// value (I2C peripheral connected to APB).
+	// 0b000000: Not allowed
+	// 0b000001: Not allowed
+	// 0b000010: 2 MHz
+	// ...
+	// 0b110010: 50 MHz
+	// Higher than 0b101010: Not allowed
+	// Esse 8 vem do fato de que ao ser ligado o processador seleciona automaticamente
+	// o seu SYSCLK com HSI (High Speed Internal de 8MHz), isso pq não fiz nenhuma
+	// como não há configuração no RCC o barramento APB1 (que é o barramento a qual o
+	// i2c está ligado) também tem frequência de 8MHz.
+	I2C1->CR2 = 0x8; // Considerando que F_PCLK1 = 8MHz, (obs.: A letra P vem de Peripheral)
+
+	// Agora o clock do i2c
+	// 26.6.8 I2C Clock control register (I2C_CCR)
+	// Queremos que o periférico gere um clock (SCL) de 100kHz
+	// Sabemos que: F_SCL = (F_PCLK1) / (2 * CCR)
+	// Logo:
+	//I2C1->CCR = 40;
+	I2C1->CCR = 80;
+
+	// 26.6.9 I2C TRISE register (I2C_TRISE)
+	// Bits 5:0 TRISE[5:0]: Maximum rise time in Fm/Sm mode (Master mode)
+	// The purpose is to keep a stable SCL frequency whatever
+	// the SCL rising edge duration.
+	// esse é o tempo que o sinal leva para sair de 0 para 1
+	// no caso: TRISE = (1000 / T_PCLK1) + 1
+	I2C1->TRISE = 9;
+
+	// Vamos habilitar o ack (indicando que queremos receber mais um byte)
+	// Bit 10 ACK: Acknowledge enable
+	// 1: Acknowledge returned after a byte is received (matched address or data)
+	I2C1->CR1 |= (1 << 10);
+
+	// Vamos habilitar algumas interrupções que a interface de i2c pode gerar
+	// Vai servir para sabermos que chegou um dado
+	// Receive buffer not empty: RxNE (Event Flag)
+	// Start bit sent (Master): SB (Event Flag)
+	// Address sent (Master) or Address matched (Slave): ADDR (Event Flag)
+	// Transmit buffer empty: TxE (Event Flag)
+	// Bit 10 ITBUFEN: Buffer interrupt enable
+	// 1: TxE = 1 or RxNE = 1 generates Event Interrupt (whatever the state of DMAEN)
+	// Bit 9 ITEVTEN: Event interrupt enable
+	// 1: Event interrupt enabled
+	i2c_interrupt_enable(10);
+	i2c_interrupt_enable(9);
+
+	// Por fim vamos habilitar o periférico
+	// 26.6.1 I2C Control register 1 (I2C_CR1)
+	// Bit 0 PE: Peripheral enable
+	// 0: Peripheral disable
+	// 1: Peripheral enable
+	I2C1->CR1 |= (1 << 0);
+
+	// Habilitar que as interrupções da USART e do I2C sejam aceitas no nvic
+	NVIC_EnableIRQ(USART1_IRQn);
+	NVIC_EnableIRQ(I2C1_EV_IRQn);
+
+	uint8_t msg[] = "Vai dar certo Davyd \r\n";
+	uart_write(msg);
+
+	while(1){
+		if(process == uart_process){
+			temperature_convert();
+			uart_write_int(temperature);
+			toggle_led();
+			process = i2c_process;
+		}
+		else if (process == i2c_process){
+			send_i2c_request();
+			process = none;
+		}
+		else if (process == none);
+	}
+}

@@ -1,0 +1,21 @@
+2026-06-16 13:48:12,787 [INFO] Activator:176 - 
+
+
+2026-06-16 13:48:12,798 [INFO] Activator:177 - !SESSION log4j initialized
+2026-06-16 13:48:20,444 [INFO] LogOutputStream:77 - [STDOUT_REDIRECT] 
+2026-06-16 13:48:43,940 [ERROR] LogOutputStream:75 - [STDERR_REDIRECT] SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+2026-06-16 13:48:43,941 [ERROR] LogOutputStream:75 - [STDERR_REDIRECT] SLF4J: Defaulting to no-operation (NOP) logger implementation
+2026-06-16 13:48:43,943 [ERROR] LogOutputStream:75 - [STDERR_REDIRECT] SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+2026-06-16 14:18:36,702 [ERROR] ConfigurationRetriever:142 - IOException on connection: Read timed out
+2026-06-16 14:18:49,268 [ERROR] ConfigurationRetriever:142 - IOException on connection: connect timed out
+2026-06-16 14:18:59,448 [ERROR] ConfigurationRetriever:142 - IOException on connection: Read timed out
+2026-06-16 14:23:28,849 [ERROR] AdobePublisher:183 - Exception while getting the server answer: java.net.SocketTimeoutException: Read timed out
+2026-06-16 14:23:31,196 [ERROR] ConfigurationRetriever:142 - IOException on connection: Read timed out
+2026-06-16 14:44:03,005 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: connect timed out
+2026-06-16 14:44:06,814 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: Read timed out
+2026-06-16 14:44:08,830 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: connect timed out
+2026-06-16 14:44:10,842 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: connect timed out
+2026-06-16 14:44:14,253 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: Read timed out
+2026-06-16 14:44:18,568 [ERROR] ConfigurationRetriever:142 - IOException on connection: Read timed out
+2026-06-16 14:44:23,717 [ERROR] ConfigurationRetriever:142 - IOException on connection: Read timed out
+2026-06-16 14:44:26,363 [ERROR] AdobePublisher:162 - Exception while opening the connection: java.net.SocketTimeoutException: Read timed out
